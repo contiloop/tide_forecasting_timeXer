@@ -4,7 +4,7 @@ model_name=TimeXer
 
 
 /usr/local/envs/myenv/bin/python -u run.py \
-  --task_name short_term_forecast \
+  --task_name long_term_forecast \
   --is_training 1 \
   --root_path ./dataset/\
   --data_path DT_0020.csv \
@@ -28,11 +28,11 @@ model_name=TimeXer
   --itr 1
 
 /usr/local/envs/myenv/bin/python -u run.py \
-  --task_name short_term_forecast \
+  --task_name long_term_forecast \
   --is_training 1 \
   --root_path ./dataset/ \
   --data_path DT_0020.csv \
-  --model_id weather_96_192 \
+  --model_id DT_0020_96_192 \
   --model $model_name \
   --data TIDE \
   --features MS \
