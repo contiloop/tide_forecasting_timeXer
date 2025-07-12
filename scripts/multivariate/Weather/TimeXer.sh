@@ -9,6 +9,7 @@ model_name=TimeXer
   --root_path ./dataset/\
   --data_path DT_0001.csv \
   --model $model_name \
+  --target residual \
   --data TIDE \
   --features MS \
   --seq_len 192 \
@@ -33,6 +34,7 @@ model_name=TimeXer
   --root_path ./dataset/\
   --data_path DT_0020.csv \
   --model $model_name \
+  --target residual \
   --data TIDE \
   --features MS \
   --seq_len 192 \
@@ -57,6 +59,7 @@ model_name=TimeXer
   --root_path ./dataset/\
   --data_path DT_0057.csv \
   --model $model_name \
+  --target residual \
   --data TIDE \
   --features MS \
   --seq_len 192 \
