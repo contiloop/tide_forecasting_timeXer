@@ -5,7 +5,7 @@ model_name=TimeXer
 
 /usr/local/envs/myenv/bin/python -u run.py \
   --task_name long_term_forecast \
-  --is_training 0 \
+  --is_training 1 \
   --root_path ./dataset/\
   --data_path DT_0001.csv \
   --model $model_name \
@@ -30,7 +30,7 @@ model_name=TimeXer
 
 /usr/local/envs/myenv/bin/python -u run.py \
   --task_name long_term_forecast \
-  --is_training 0 \
+  --is_training 1 \
   --root_path ./dataset/\
   --data_path DT_0020.csv \
   --model $model_name \
@@ -55,7 +55,7 @@ model_name=TimeXer
 
 /usr/local/envs/myenv/bin/python -u run.py \
   --task_name long_term_forecast \
-  --is_training 0 \
+  --is_training 1 \
   --root_path ./dataset/\
   --data_path DT_0057.csv \
   --model $model_name \
