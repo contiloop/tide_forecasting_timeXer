@@ -12,7 +12,6 @@ import numpy as np
 
 warnings.filterwarnings('ignore')
 
-
 class Exp_Long_Term_Forecast(Exp_Basic):
     def __init__(self, args):
         super(Exp_Long_Term_Forecast, self).__init__(args)
@@ -47,10 +46,9 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                 batch_x_mark = batch_x_mark.float().to(self.device)
                 batch_y_mark = batch_y_mark.float().to(self.device)
 
-                # decoder input
                 dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
                 dec_inp = torch.cat([batch_y[:, :self.args.label_len, :], dec_inp], dim=1).float().to(self.device)
-                # encoder - decoder
+
                 if self.args.use_amp:
                     with torch.cuda.amp.autocast():
                         if self.args.output_attention:
@@ -62,6 +60,10 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                         outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)[0]
                     else:
                         outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+
+                if outputs.dim() == 2:
+                    outputs = outputs.unsqueeze(-1)
+
                 f_dim = -1 if self.args.features == 'MS' else 0
                 outputs = outputs[:, -self.args.pred_len:, f_dim:]
                 batch_y = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
@@ -70,7 +72,6 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                 true = batch_y.detach().cpu()
 
                 loss = criterion(pred, true)
-
                 total_loss.append(loss)
         total_loss = np.average(total_loss)
         self.model.train()
@@ -86,10 +87,8 @@ class Exp_Long_Term_Forecast(Exp_Basic):
             os.makedirs(path)
 
         time_now = time.time()
-
         train_steps = len(train_loader)
         early_stopping = EarlyStopping(patience=self.args.patience, verbose=True)
-
         model_optim = self._select_optimizer()
         criterion = self._select_criterion()
 
@@ -99,30 +98,27 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         for epoch in range(self.args.train_epochs):
             iter_count = 0
             train_loss = []
-
             self.model.train()
             epoch_time = time.time()
             for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(train_loader):
                 iter_count += 1
                 model_optim.zero_grad()
                 batch_x = batch_x.float().to(self.device)
-
                 batch_y = batch_y.float().to(self.device)
                 batch_x_mark = batch_x_mark.float().to(self.device)
                 batch_y_mark = batch_y_mark.float().to(self.device)
 
-                # decoder input
                 dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
                 dec_inp = torch.cat([batch_y[:, :self.args.label_len, :], dec_inp], dim=1).float().to(self.device)
 
-                # encoder - decoder
                 if self.args.use_amp:
                     with torch.cuda.amp.autocast():
                         if self.args.output_attention:
                             outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)[0]
                         else:
                             outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
-
+                        if outputs.dim() == 2:
+                            outputs = outputs.unsqueeze(-1)
                         f_dim = -1 if self.args.features == 'MS' else 0
                         outputs = outputs[:, -self.args.pred_len:, f_dim:]
                         batch_y = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
@@ -133,7 +129,8 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                         outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)[0]
                     else:
                         outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
-
+                    if outputs.dim() == 2:
+                        outputs = outputs.unsqueeze(-1)
                     f_dim = -1 if self.args.features == 'MS' else 0
                     outputs = outputs[:, -self.args.pred_len:, f_dim:]
                     batch_y = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
@@ -167,104 +164,123 @@ class Exp_Long_Term_Forecast(Exp_Basic):
             if early_stopping.early_stop:
                 print("Early stopping")
                 break
-
             adjust_learning_rate(model_optim, epoch + 1, self.args)
 
         best_model_path = path + '/' + 'checkpoint.pth'
         self.model.load_state_dict(torch.load(best_model_path))
-
         return self.model
 
+    # exp_long_term_forecasting.py의 test 함수
+
     def test(self, setting, test=0):
-        test_data, test_loader = self._get_data(flag='test')
-        if test:
-            print('loading model')
-            self.model.load_state_dict(torch.load(os.path.join('./checkpoints/' + setting, 'checkpoint.pth')))
+      test_data, test_loader = self._get_data(flag='test')
+      if test:
+          print('loading model')
+          self.model.load_state_dict(torch.load(os.path.join('./checkpoints/' + setting, 'checkpoint.pth')))
 
-        preds = []
-        trues = []
-        folder_path = './test_results/' + setting + '/'
-        if not os.path.exists(folder_path):
-            os.makedirs(folder_path)
+      preds = []
+      trues = []
+      attentions = []
 
-        self.model.eval()
-        with torch.no_grad():
-            for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(test_loader):
-                batch_x = batch_x.float().to(self.device)
-                batch_y = batch_y.float().to(self.device)
+      # 1. 시각화(PDF) 저장을 위한 폴더 경로 설정
+      pdf_folder_path = './test_results/' + setting + '/'
+      if not os.path.exists(pdf_folder_path):
+          os.makedirs(pdf_folder_path)
 
-                batch_x_mark = batch_x_mark.float().to(self.device)
-                batch_y_mark = batch_y_mark.float().to(self.device)
+      self.model.eval()
+      with torch.no_grad():
+          for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(test_loader):
+              batch_x = batch_x.float().to(self.device)
+              batch_y = batch_y.float().to(self.device)
+              batch_x_mark = batch_x_mark.float().to(self.device)
+              batch_y_mark = batch_y_mark.float().to(self.device)
 
-                # decoder input
-                dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
-                dec_inp = torch.cat([batch_y[:, :self.args.label_len, :], dec_inp], dim=1).float().to(self.device)
-                # encoder - decoder
-                if self.args.use_amp:
-                    with torch.cuda.amp.autocast():
-                        if self.args.output_attention:
-                            outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)[0]
-                        else:
-                            outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
-                else:
-                    if self.args.output_attention:
-                        outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)[0]
+              dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
+              dec_inp = torch.cat([batch_y[:, :self.args.label_len, :], dec_inp], dim=1).float().to(self.device)
 
-                    else:
-                        outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+              if self.args.output_attention:
+                  outputs, *attention = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+              else:
+                  outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
 
-                f_dim = -1 if self.args.features == 'MS' else 0
-                outputs = outputs[:, -self.args.pred_len:, :]
-                batch_y = batch_y[:, -self.args.pred_len:, :].to(self.device)
-                outputs = outputs.detach().cpu().numpy()
-                batch_y = batch_y.detach().cpu().numpy()
-                if test_data.scale and self.args.inverse:
-                    shape = batch_y.shape
-                    if self.args.features == 'MS':
-                        outputs = np.tile(outputs, [1, 1, batch_y.shape[-1]])
-                    outputs = test_data.inverse_transform(outputs.reshape(shape[0] * shape[1], -1)).reshape(shape)
-                    batch_y = test_data.inverse_transform(batch_y.reshape(shape[0] * shape[1], -1)).reshape(shape)
-        
-                outputs = outputs[:, :, f_dim:]
-                batch_y = batch_y[:, :, f_dim:]
+              if outputs.dim() == 2:
+                  outputs = outputs.unsqueeze(-1)
 
-                pred = outputs
-                true = batch_y
+              f_dim = -1 if self.args.features == 'MS' else 0
+              outputs = outputs[:, -self.args.pred_len:, :]
+              batch_y = batch_y[:, -self.args.pred_len:, :].to(self.device)
+              outputs = outputs.detach().cpu().numpy()
+              batch_y = batch_y.detach().cpu().numpy()
 
-                preds.append(pred)
-                trues.append(true)
-                if i % 20 == 0:
-                    input = batch_x.detach().cpu().numpy()
-                    if test_data.scale and self.args.inverse:
-                        shape = input.shape
-                        input = test_data.inverse_transform(input.reshape(shape[0] * shape[1], -1)).reshape(shape)
-                    gt = np.concatenate((input[0, :, -1], true[0, :, -1]), axis=0)
-                    pd = np.concatenate((input[0, :, -1], pred[0, :, -1]), axis=0)
-                    visual(gt, pd, os.path.join(folder_path, str(i) + '.pdf'))
+              if self.args.output_attention:
+                  attentions.append(attention[0][0].detach().cpu().numpy())
 
-        preds = np.concatenate(preds, axis=0)
-        trues = np.concatenate(trues, axis=0)
-        print('test shape:', preds.shape, trues.shape)
-        preds = preds.reshape(-1, preds.shape[-2], preds.shape[-1])
-        trues = trues.reshape(-1, trues.shape[-2], trues.shape[-1])
-        print('test shape:', preds.shape, trues.shape)
+              if test_data.scale and self.args.inverse:
+                  unscaled_outputs_list = []
+                  unscaled_batch_y_list = []
 
-        # result save
-        folder_path = './results/' + setting + '/'
-        if not os.path.exists(folder_path):
-            os.makedirs(folder_path)
+                  for j in range(outputs.shape[0]):
+                      output_sample = outputs[j]
+                      true_sample = batch_y[j]
 
-        mae, mse, rmse, mape, mspe = metric(preds, trues)
-        print('mse:{}, mae:{}'.format(mse, mae))
-        f = open("result_long_term_forecast.txt", 'a')
-        f.write(setting + "  \n")
-        f.write('mse:{}, mae:{}'.format(mse, mae))
-        f.write('\n')
-        f.write('\n')
-        f.close()
+                      if self.args.features == 'MS':
+                          num_features = test_data.scaler.n_features_in_
+                          output_sample = np.tile(output_sample, (1, num_features))
 
-        np.save(folder_path + 'metrics.npy', np.array([mae, mse, rmse, mape, mspe]))
-        np.save(folder_path + 'pred.npy', preds)
-        np.save(folder_path + 'true.npy', trues)
+                      unscaled_output = test_data.inverse_transform(output_sample)
+                      unscaled_outputs_list.append(unscaled_output)
 
-        return
+                      unscaled_true = test_data.inverse_transform(true_sample)
+                      unscaled_batch_y_list.append(unscaled_true)
+
+                  outputs = np.stack(unscaled_outputs_list, axis=0)
+                  batch_y = np.stack(unscaled_batch_y_list, axis=0)
+
+              outputs = outputs[:, :, f_dim:]
+              batch_y = batch_y[:, :, f_dim:]
+
+              pred = outputs
+              true = batch_y
+
+              preds.append(pred)
+              trues.append(true)
+
+              if i % 20 == 0:
+                  input = batch_x.detach().cpu().numpy()
+                  if test_data.scale and self.args.inverse:
+                      shape = input.shape
+                      input = test_data.inverse_transform(input.reshape(-1, input.shape[-1])).reshape(shape)
+                  gt = np.concatenate((input[0, :, -1], true[0, :, -1]), axis=0)
+                  pd = np.concatenate((input[0, :, -1], pred[0, :, -1]), axis=0)
+                  # PDF 저장 경로를 'pdf_folder_path'로 지정
+                  visual(gt, pd, os.path.join(pdf_folder_path, str(i) + '.pdf'))
+
+      preds = np.concatenate(preds, axis=0)
+      trues = np.concatenate(trues, axis=0)
+      print('test shape:', preds.shape, trues.shape)
+
+      # 2. 최종 결과(NPY, TXT) 저장을 위한 폴더 경로 설정
+      results_folder_path = './results/' + setting + '/'
+      if not os.path.exists(results_folder_path):
+          os.makedirs(results_folder_path)
+
+      if self.args.output_attention:
+          attentions = np.concatenate(attentions, axis=0)
+          print('attention shape:', attentions.shape)
+          np.save(os.path.join(results_folder_path, 'attention.npy'), attentions)
+
+      mae, mse, rmse, mape, mspe = metric(preds, trues)
+      print('mse:{}, mae:{}'.format(mse, mae))
+
+      # 결과 저장 경로를 'results_folder_path'로 지정
+      with open(os.path.join(results_folder_path, "result_metrics.txt"), 'a') as f:
+          f.write(setting + "  \n")
+          f.write('mse:{}, mae:{}'.format(mse, mae))
+          f.write('\n')
+          f.write('\n')
+
+      np.save(os.path.join(results_folder_path, 'metrics.npy'), np.array([mae, mse, rmse, mape, mspe]))
+      np.save(os.path.join(results_folder_path, 'pred.npy'), preds)
+      np.save(os.path.join(results_folder_path, 'true.npy'), trues)
+
+      return

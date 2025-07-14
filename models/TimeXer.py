@@ -56,15 +56,17 @@ class Encoder(nn.Module):
         self.projection = projection
 
     def forward(self, x, cross, x_mask=None, cross_mask=None, tau=None, delta=None):
+        attns = []
         for layer in self.layers:
-            x = layer(x, cross, x_mask=x_mask, cross_mask=cross_mask, tau=tau, delta=delta)
+            x, attn = layer(x, cross, x_mask=x_mask, cross_mask=cross_mask, tau=tau, delta=delta)
+            attns.append(attn)
 
         if self.norm is not None:
             x = self.norm(x)
 
         if self.projection is not None:
             x = self.projection(x)
-        return x
+        return x, attns
 
 
 class EncoderLayer(nn.Module):
@@ -93,11 +95,15 @@ class EncoderLayer(nn.Module):
 
         x_glb_ori = x[:, -1, :].unsqueeze(1)
         x_glb = torch.reshape(x_glb_ori, (B, -1, D))
-        x_glb_attn = self.dropout(self.cross_attention(
+
+        # <<< FIX: Capture attention weights from cross_attention >>>
+        x_glb_attn, cross_attn_weights = self.cross_attention(
             x_glb, cross, cross,
             attn_mask=cross_mask,
             tau=tau, delta=delta
-        )[0])
+        )
+        x_glb_attn = self.dropout(x_glb_attn)
+
         x_glb_attn = torch.reshape(x_glb_attn,
                                    (x_glb_attn.shape[0] * x_glb_attn.shape[1], x_glb_attn.shape[2])).unsqueeze(1)
         x_glb = x_glb_ori + x_glb_attn
@@ -108,7 +114,8 @@ class EncoderLayer(nn.Module):
         y = self.dropout(self.activation(self.conv1(y.transpose(-1, 1))))
         y = self.dropout(self.conv2(y).transpose(-1, 1))
 
-        return self.norm3(x + y)
+        # <<< FIX: Return captured attention weights >>>
+        return self.norm3(x + y), cross_attn_weights
 
 
 class Model(nn.Module):
@@ -123,6 +130,7 @@ class Model(nn.Module):
         self.patch_len = configs.patch_len
         self.patch_num = int(configs.seq_len // configs.patch_len)
         self.n_vars = 1 if configs.features == 'MS' else configs.enc_in
+
         # Embedding
         self.en_embedding = EnEmbedding(self.n_vars, configs.d_model, self.patch_len, configs.dropout)
 
@@ -133,13 +141,13 @@ class Model(nn.Module):
         self.encoder = Encoder(
             [
                 EncoderLayer(
-                    AttentionLayer(
+                    AttentionLayer( # Self-Attention
                         FullAttention(False, configs.factor, attention_dropout=configs.dropout,
-                                      output_attention=False),
+                                      output_attention=False), # This remains False
                         configs.d_model, configs.n_heads),
-                    AttentionLayer(
+                    AttentionLayer( # Cross-Attention
                         FullAttention(False, configs.factor, attention_dropout=configs.dropout,
-                                      output_attention=False),
+                                      output_attention=True), # <<< FIX: This is set to True >>>
                         configs.d_model, configs.n_heads),
                     configs.d_model,
                     configs.d_ff,
@@ -156,7 +164,6 @@ class Model(nn.Module):
 
     def forecast(self, x_enc, x_mark_enc, x_dec, x_mark_dec):
         if self.use_norm:
-            # Normalization from Non-stationary Transformer
             means = x_enc.mean(1, keepdim=True).detach()
             x_enc = x_enc - means
             stdev = torch.sqrt(torch.var(x_enc, dim=1, keepdim=True, unbiased=False) + 1e-5)
@@ -167,26 +174,26 @@ class Model(nn.Module):
         en_embed, n_vars = self.en_embedding(x_enc[:, :, -1].unsqueeze(-1).permute(0, 2, 1))
         ex_embed = self.ex_embedding(x_enc[:, :, :-1], x_mark_enc)
 
-        enc_out = self.encoder(en_embed, ex_embed)
+        # <<< FIX: Capture attentions from encoder >>>
+        enc_out, attns = self.encoder(en_embed, ex_embed)
+
         enc_out = torch.reshape(
             enc_out, (-1, n_vars, enc_out.shape[-2], enc_out.shape[-1]))
-        # z: [bs x nvars x d_model x patch_num]
         enc_out = enc_out.permute(0, 1, 3, 2)
 
-        dec_out = self.head(enc_out)  # z: [bs x nvars x target_window]
+        dec_out = self.head(enc_out)
         dec_out = dec_out.permute(0, 2, 1)
 
         if self.use_norm:
-            # De-Normalization from Non-stationary Transformer
             dec_out = dec_out * (stdev[:, 0, -1:].unsqueeze(1).repeat(1, self.pred_len, 1))
             dec_out = dec_out + (means[:, 0, -1:].unsqueeze(1).repeat(1, self.pred_len, 1))
 
-        return dec_out
+        # <<< FIX: Return attentions >>>
+        return dec_out, attns
 
 
     def forecast_multi(self, x_enc, x_mark_enc, x_dec, x_mark_dec):
         if self.use_norm:
-            # Normalization from Non-stationary Transformer
             means = x_enc.mean(1, keepdim=True).detach()
             x_enc = x_enc - means
             stdev = torch.sqrt(torch.var(x_enc, dim=1, keepdim=True, unbiased=False) + 1e-5)
@@ -197,29 +204,32 @@ class Model(nn.Module):
         en_embed, n_vars = self.en_embedding(x_enc.permute(0, 2, 1))
         ex_embed = self.ex_embedding(x_enc, x_mark_enc)
 
-        enc_out = self.encoder(en_embed, ex_embed)
+        # <<< FIX: Capture attentions from encoder >>>
+        enc_out, attns = self.encoder(en_embed, ex_embed)
+
         enc_out = torch.reshape(
             enc_out, (-1, n_vars, enc_out.shape[-2], enc_out.shape[-1]))
-        # z: [bs x nvars x d_model x patch_num]
         enc_out = enc_out.permute(0, 1, 3, 2)
 
-        dec_out = self.head(enc_out)  # z: [bs x nvars x target_window]
+        dec_out = self.head(enc_out)
         dec_out = dec_out.permute(0, 2, 1)
 
         if self.use_norm:
-            # De-Normalization from Non-stationary Transformer
             dec_out = dec_out * (stdev[:, 0, :].unsqueeze(1).repeat(1, self.pred_len, 1))
             dec_out = dec_out + (means[:, 0, :].unsqueeze(1).repeat(1, self.pred_len, 1))
 
-        return dec_out
+        # <<< FIX: Return attentions >>>
+        return dec_out, attns
 
     def forward(self, x_enc, x_mark_enc, x_dec, x_mark_dec, mask=None):
         if self.task_name == 'long_term_forecast' or self.task_name == 'short_term_forecast':
+            # <<< FIX: Capture attentions from forecast methods >>>
             if self.features == 'M':
-                dec_out = self.forecast_multi(x_enc, x_mark_enc, x_dec, x_mark_dec)
-                return dec_out[:, -self.pred_len:, :]  # [B, L, D]
+                dec_out, attns = self.forecast_multi(x_enc, x_mark_enc, x_dec, x_mark_dec)
             else:
-                dec_out = self.forecast(x_enc, x_mark_enc, x_dec, x_mark_dec)
-                return dec_out[:, -self.pred_len:, :]  # [B, L, D]
+                dec_out, attns = self.forecast(x_enc, x_mark_enc, x_dec, x_mark_dec)
+
+            # <<< FIX: Return predictions and attentions as a tuple >>>
+            return dec_out[:, -self.pred_len:, :], attns
         else:
             return None
