@@ -18,8 +18,8 @@ model_name=TimeXer
   --model_id DT_0001_192_96 \
   --e_layers 1 \
   --factor 3 \
-  --enc_in 6 \
-  --dec_in 6 \
+  --enc_in 5 \
+  --dec_in 5 \
   --c_out 1 \
   --des 'Exp' \
   --d_model 256 \
@@ -44,8 +44,8 @@ model_name=TimeXer
   --model_id DT_0020_192_96 \
   --e_layers 1 \
   --factor 3 \
-  --enc_in 6 \
-  --dec_in 6 \
+  --enc_in 5 \
+  --dec_in 5 \
   --c_out 1 \
   --des 'Exp' \
   --d_model 256 \
@@ -70,8 +70,8 @@ model_name=TimeXer
   --model_id DT_0057_192_96 \
   --e_layers 1 \
   --factor 3 \
-  --enc_in 5 \
-  --dec_in 5 \
+  --enc_in 4 \
+  --dec_in 4 \
   --c_out 1 \
   --des 'Exp' \
   --d_model 256 \
