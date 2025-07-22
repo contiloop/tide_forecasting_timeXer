@@ -9,6 +9,7 @@ import os
 import time
 import warnings
 import numpy as np
+import joblib
 
 warnings.filterwarnings('ignore')
 
@@ -168,6 +169,12 @@ class Exp_Long_Term_Forecast(Exp_Basic):
 
         best_model_path = path + '/' + 'checkpoint.pth'
         self.model.load_state_dict(torch.load(best_model_path))
+        # --- ★★★ 핵심 수정 사항 2 ★★★ ---
+        # 학습 데이터의 스케일러를 파일로 저장
+        scaler_path = os.path.join(path, 'scaler.gz')
+        joblib.dump(train_data.scaler, scaler_path)
+        print(f"Scaler saved to {scaler_path}")
+        # ----------------------------------
         return self.model
 
     # exp_long_term_forecasting.py의 test 함수
