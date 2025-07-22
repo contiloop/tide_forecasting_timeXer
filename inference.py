@@ -5,16 +5,19 @@ import argparse
 import joblib
 import os
 from models import TimeXer # 사용하는 모델에 맞게 수정
-import tqdm
+from tqdm import tqdm
 
 # 1. 인자 파싱 (필요한 정보만)
 # --- 1. 설정 및 인자 파싱 (이 부분을 전체 교체) ---
 parser = argparse.ArgumentParser(description='Time Series Prediction')
 
-# --- 필수 인자 ---
+# 공통 필수 인자
 parser.add_argument('--checkpoint_path', type=str, required=True, help='Path to the model checkpoint file (.pth)')
 parser.add_argument('--scaler_path', type=str, required=True, help='Path to the saved scaler file (.gz)')
-parser.add_argument('--input_file', type=str, required=True, help='Path to the new input data CSV file')
+
+# 모드 선택 인자 (둘 중 하나만 사용)
+parser.add_argument('--predict_input_file', type=str, default=None, help='[Mode 1] Path to the CSV file for single future prediction')
+parser.add_argument('--evaluate_file', type=str, default=None, help='[Mode 2] Path to the CSV file for rolling evaluation')
 
 # --- 모델 아키텍처 인자 (학습 때와 동일하게) ---
 parser.add_argument('--model', type=str, default='TimeXer', help='model name') # 모델 이름 추가
@@ -85,7 +88,9 @@ def evaluate_performance(args, model, scaler, device):
     raw_data = df_eval.values
     data_scaled = scaler.transform(raw_data)
 
-    preds, trues = [], []
+    preds_unscaled = []
+    trues_unscaled = []
+
     num_samples = len(data_scaled) - args.seq_len - args.pred_len + 1
     for i in tqdm(range(num_samples), desc="Evaluating"):
         s_begin = i
@@ -100,11 +105,27 @@ def evaluate_performance(args, model, scaler, device):
         with torch.no_grad():
             outputs = model(batch_x, None, None, None)[0]
         
-        preds.append(outputs.detach().cpu().numpy()[0])
-        trues.append(true_scaled[-args.pred_len:, -1:])
+        # --- ★★★ 이 부분이 추가/수정되었습니다 ★★★ ---
+        # 1. 스케일링된 결과 가져오기
+        pred_scaled = outputs.detach().cpu().numpy()[0]
 
-    return np.array(preds), np.array(trues)
+        # 2. 예측값(pred) 스케일 복원
+        if args.features == 'MS':
+            padding = np.zeros((pred_scaled.shape[0], scaler.n_features_in_ - 1))
+            pred_padded = np.concatenate((padding, pred_scaled), axis=1)
+            pred_unscaled = scaler.inverse_transform(pred_padded)[:, -1:]
+        else:
+            pred_unscaled = scaler.inverse_transform(pred_scaled)
+        
+        # 3. 실제값(true) 스케일 복원
+        # true_scaled는 이미 모든 feature를 포함하므로 패딩 불필요
+        true_unscaled = scaler.inverse_transform(true_scaled)[:, -1:]
 
+        preds_unscaled.append(pred_unscaled)
+        trues_unscaled.append(true_unscaled)
+        # ---------------------------------------------
+
+    return np.array(preds_unscaled), np.array(trues_unscaled)
 
 # --- 5. 메인 로직 ---
 if __name__ == '__main__':
