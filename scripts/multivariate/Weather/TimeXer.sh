@@ -26,7 +26,7 @@ model_name=TimeXer
   --d_ff 512 \
   --batch_size 4 \
   --num_workers 8 \
-  --output_attention
+  --output_attention \
   --itr 1
 
 /usr/local/envs/myenv/bin/python -u run.py \
@@ -52,6 +52,6 @@ model_name=TimeXer
   --d_ff 512 \
   --batch_size 4 \
   --num_workers 8 \
-  --output_attention
+  --output_attention \
   --itr 1
 
